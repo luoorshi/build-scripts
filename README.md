@@ -81,7 +81,7 @@ bash build-scripts/lois_buidl_tools.sh h5
 - 若你**未**事先设置 **`KERNEL_IMAGE`** / **`DTB_PATH`**，脚本在编译成功后会自动使用默认路径：
   - **H5**：`linux/arch/arm64/boot/Image`，`linux/arch/arm64/boot/dts/allwinner/sun50i-h5-quark-luoorshi.dtb`
   - **H3**：`linux/arch/arm/boot/Image`，`linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb`  
-  导出上述变量后，制作 `.img` 时会把内核与 dtb 复制到 FAT 分区（文件名仍为 `Image` 与 `dtb.dtb`）。你也可在运行前自行 `export` 覆盖路径。
+  导出上述变量后，制作 `.img` 时会把内核复制为 `Image`，dtb 复制为 **`sun50i-h5-quark-luoorshi.dtb`**（H5）或 **`sun8i-h3-quark-luoorshi.dtb`**（H3）。你也可在运行前自行 `export` 覆盖路径。
 
 ## 产物与镜像输出
 
@@ -101,7 +101,7 @@ bash build-scripts/lois_buidl_tools.sh h5
 | 变量 | 含义 |
 |------|------|
 | `KERNEL_IMAGE` | 内核镜像路径，复制到 boot 分区文件名为 `Image` |
-| `DTB_PATH` | 设备树路径，复制为 `dtb.dtb`（可在 boot 分区自行改名或改 boot.cmd） |
+| `DTB_PATH` | 设备树源路径；写入 FAT 时改名为 **`sun50i-h5-quark-luoorshi.dtb`**（H5）或 **`sun8i-h3-quark-luoorshi.dtb`**（H3） |
 | `BOOT_SCR` | 已生成的 `boot.scr` 路径 |
 | `BOOT_CMD` | 若设置且文件存在，则用 `mkimage` 生成临时 `boot.scr`：**H3** 使用 **`-A arm`**，**H5** 使用 **`-A arm64`**（与指南一致） |
 

@@ -296,7 +296,7 @@ cleanup_boot_scr_tmp() {
 
 make_sdcard_img() {
 	local soc="$1"
-	local img rel_uboot uboot_path img_abs uboot_abs tmp_extra extra_copy
+	local img rel_uboot uboot_path img_abs uboot_abs tmp_extra extra_copy dtb_boot_name
 
 	fail_img() {
 		[[ -n "${tmp_extra:-}" && -d "${tmp_extra}" ]] && rm -rf "$tmp_extra"
@@ -307,9 +307,11 @@ make_sdcard_img() {
 	if [[ "$soc" == "h5" ]]; then
 		img="$BUILD_ROOT/quark-n-h5-sdcard.img"
 		rel_uboot="h5/u-boot-sunxi-with-spl-h5.bin"
+		dtb_boot_name="sun50i-h5-quark-luoorshi.dtb"
 	elif [[ "$soc" == "h3" ]]; then
 		img="$BUILD_ROOT/quark-n-h3-sdcard.img"
 		rel_uboot="h3/u-boot-sunxi-with-spl-h3.bin"
+		dtb_boot_name="sun8i-h3-quark-luoorshi.dtb"
 	else
 		fail_img "make_sdcard_img: 无效 soc=$soc"
 	fi
@@ -333,7 +335,7 @@ make_sdcard_img() {
 		cp -f "$KERNEL_IMAGE" "$tmp_extra/Image" && extra_copy=1
 	fi
 	if [[ -n "${DTB_PATH:-}" && -f "$DTB_PATH" ]]; then
-		cp -f "$DTB_PATH" "$tmp_extra/dtb.dtb" && extra_copy=1
+		cp -f "$DTB_PATH" "$tmp_extra/$dtb_boot_name" && extra_copy=1
 	fi
 	if [[ -n "${BOOT_SCR:-}" && -f "$BOOT_SCR" ]]; then
 		cp -f "$BOOT_SCR" "$tmp_extra/boot.scr" && extra_copy=1
@@ -354,6 +356,7 @@ set -e
 IMG='$img_abs'
 UBOOT='$uboot_abs'
 EXTRA='$tmp_extra'
+DTB_BOOT_NAME='$dtb_boot_name'
 parted -s \"\$IMG\" mktable msdos
 parted -s \"\$IMG\" mkpart primary fat32 1MiB 256MiB
 parted -s \"\$IMG\" mkpart primary ext4 256MiB 100%
@@ -378,7 +381,7 @@ mount \"\$P1\" /mnt/lois_boot
 mount \"\$P2\" /mnt/lois_root
 if [[ -d \"\$EXTRA\" ]]; then
   [[ -f \"\$EXTRA/Image\" ]] && cp -f \"\$EXTRA/Image\" /mnt/lois_boot/
-  [[ -f \"\$EXTRA/dtb.dtb\" ]] && cp -f \"\$EXTRA/dtb.dtb\" /mnt/lois_boot/
+  [[ -f \"\$EXTRA/\$DTB_BOOT_NAME\" ]] && cp -f \"\$EXTRA/\$DTB_BOOT_NAME\" /mnt/lois_boot/
   [[ -f \"\$EXTRA/boot.scr\" ]] && cp -f \"\$EXTRA/boot.scr\" /mnt/lois_boot/
 fi
 mkdir -p /mnt/lois_root/proc /mnt/lois_root/sys /mnt/lois_root/dev /mnt/lois_root/run /mnt/lois_root/tmp 2>/dev/null || true
