@@ -401,7 +401,8 @@ trap - EXIT
 	echo "镜像已生成: $img"
 }
 
-lois_main() {
+# 实际构建逻辑（会多次 cd）；由 lois_main 包装以在结束时恢复调用前的工作目录（source 时终端路径不变）
+_lois_main_inner() {
 	local target="${1:-}"
 	local dbg="${2:-}"
 
@@ -410,6 +411,7 @@ lois_main() {
 	*)
 		echo "用法: . build-scripts/lois_buidl_tools.sh <h3|h5> [debug]" >&2
 		die "缺少或无效参数: 需要 h3 或 h5"
+		return 1
 		;;
 	esac
 
@@ -443,6 +445,15 @@ lois_main() {
 	fi
 
 	echo "======== 全部完成 ($target) ========"
+}
+
+lois_main() {
+	local _lois_saved_pwd
+	_lois_saved_pwd=$(pwd)
+	_lois_main_inner "$@"
+	local _st=$?
+	builtin cd "$_lois_saved_pwd" 2>/dev/null || true
+	return "$_st"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

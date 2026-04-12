@@ -32,7 +32,7 @@
 
 ## 使用 `lois_buidl_tools.sh`
 
-在**仓库根目录**执行（支持 **source**，失败时 **`return`** 而非 **`exit`**，避免关闭当前 shell）：
+在**仓库根目录**执行（支持 **source**，失败时 **`return`** 而非 **`exit`**，避免关闭当前 shell）。无论是否 source，脚本结束后会 **`cd` 回执行前的当前目录**，避免终端留在 `linux/`、`u-boot/` 等子目录。
 
 ```bash
 . build-scripts/lois_buidl_tools.sh h3          # H3：u-boot + kernel
