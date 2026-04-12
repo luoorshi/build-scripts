@@ -170,7 +170,7 @@ build_uboot_h5() {
 	[[ -f "$BL31" ]] || die "缺少 BL31: $BL31"
 	[[ -f "$SCP" ]] || die "缺少 SCP: $SCP"
 	command -v aarch64-none-linux-gnu-gcc &>/dev/null || die "U-Boot H5 需要 aarch64-none-linux-gnu-gcc"
-	make clean || die "u-boot make clean 失败"
+	# make clean || die "u-boot make clean 失败"
 	make quark-luoorshi-h5_defconfig ARCH=arm CROSS_COMPILE=aarch64-none-linux-gnu- || die "u-boot defconfig 失败"
 	set +o pipefail
 	make ARCH=arm CROSS_COMPILE=aarch64-none-linux-gnu- "${vflag[@]}" -j"$n" 2>&1 | tee "$BUILD_ROOT/h5/u-boot-build.log"
@@ -187,7 +187,7 @@ build_uboot_h3() {
 	echo "======== 编译 U-Boot (H3) ========"
 	cd "$REPO_ROOT/u-boot" || die "无法进入 u-boot"
 	command -v arm-none-linux-gnueabihf-gcc &>/dev/null || die "U-Boot H3 需要 arm-none-linux-gnueabihf-gcc"
-	make clean || die "u-boot make clean 失败"
+	# make clean || die "u-boot make clean 失败"
 	make quark-luoorshi-h3_defconfig ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- || die "u-boot defconfig 失败"
 	set +o pipefail
 	make ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- "${vflag[@]}" -j"$n" 2>&1 | tee "$BUILD_ROOT/h3/u-boot-build.log"
