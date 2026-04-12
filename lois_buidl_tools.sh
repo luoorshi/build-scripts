@@ -2,6 +2,8 @@
 # 统一编译入口：H3（u-boot + kernel）/ H5（ATF + crust + u-boot + kernel）。支持 source 执行。
 # 用法（仓库根目录）：. build-scripts/lois_buidl_tools.sh h3 [debug]
 #                    . build-scripts/lois_buidl_tools.sh h5 [debug]
+# tools 下工具链若为 Git LFS：脚本会检测指针/过小文件，必要时自动安装 git-lfs（apt/dnf/yum/pacman，需 sudo）并执行 git lfs pull。
+# 禁用自动拉取：export LOIS_SKIP_GIT_LFS=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_DIR="$REPO_ROOT/tools"
@@ -14,6 +16,8 @@ else
 	set -euo pipefail
 fi
 
+# 注意：用「. 本脚本」source 执行时，die 内的 return 只结束 die 自身，不会结束调用方函数。
+# 因此在各子函数中必须写「die ... || return 1」或「cmd || { die ...; return 1; }」，否则错误后仍会往下跑。
 die() {
 	echo "错误: $*" >&2
 	if [[ "$_LOIS_SOURCED" -eq 1 ]]; then
@@ -21,6 +25,146 @@ die() {
 	else
 		exit 1
 	fi
+}
+
+# tools 下大体积工具链常由 Git LFS 管理；指针文件仅百余字节，直接 tar 会报 xz/gzip format not recognized。
+_archive_size_bytes() {
+	local f="$1"
+	local s
+	if s=$(stat -c%s "$f" 2>/dev/null); then
+		echo "$s"
+	elif s=$(stat -f%z "$f" 2>/dev/null); then
+		echo "$s"
+	else
+		wc -c <"$f" | tr -d '[:space:]'
+	fi
+}
+
+# 缺失、过小、或首行为 Git LFS 指针时返回 0（需要拉取）；否则返回 1
+_archive_needs_git_lfs_pull() {
+	local archive="$1"
+	local min_bytes="${2:-100000}"
+
+	[[ -f "$archive" ]] || return 0
+
+	local sz line1
+	sz=$(_archive_size_bytes "$archive")
+	IFS= read -r line1 <"$archive" || true
+	if [[ "$line1" == "version https://git-lfs.github.com/spec/v1" ]]; then
+		return 0
+	fi
+	if [[ "${sz:-0}" -lt "$min_bytes" ]]; then
+		return 0
+	fi
+	return 1
+}
+
+# 解析 git 工作区根目录（与在 tools/ 下执行 git 命令行为一致）；供 git lfs pull 使用
+_lois_git_toplevel_for_lfs() {
+	local top
+	top=$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null) || top=""
+	[[ -n "$top" ]] && echo "$top" && return 0
+	top=$(git -C "$TOOLS_DIR" rev-parse --show-toplevel 2>/dev/null) || top=""
+	[[ -n "$top" ]] && echo "$top" && return 0
+	return 1
+}
+
+require_real_toolchain_archive() {
+	local archive="$1"
+	local desc="$2"
+	local min_bytes="${3:-100000}"
+
+	[[ -f "$archive" ]] || die "未找到 $desc: $archive" || return 1
+
+	local sz line1
+	sz=$(_archive_size_bytes "$archive")
+	IFS= read -r line1 <"$archive" || true
+	if [[ "${sz:-0}" -lt "$min_bytes" ]]; then
+		if [[ "$line1" == "version https://git-lfs.github.com/spec/v1" ]]; then
+			die "$desc 仍为 Git LFS 指针（${sz} 字节）。请在仓库根执行: git lfs pull
+或按 tools/README.md 将完整压缩包放到: $archive" || return 1
+		fi
+		die "$desc 文件过小（${sz} 字节），可能损坏或未完整下载: $archive" || return 1
+	fi
+}
+
+ensure_git_lfs_cli() {
+	if git lfs version &>/dev/null; then
+		return 0
+	fi
+	echo "未检测到 Git LFS 客户端，尝试安装 git-lfs ..."
+	if command -v apt-get &>/dev/null; then
+		sudo apt-get update -qq &&
+			sudo apt-get install -y git-lfs ||
+			die "通过 apt 安装 git-lfs 失败，请手动执行: sudo apt install -y git-lfs"
+	elif command -v dnf &>/dev/null; then
+		sudo dnf install -y git-lfs ||
+			die "通过 dnf 安装 git-lfs 失败，请手动: sudo dnf install -y git-lfs"
+	elif command -v yum &>/dev/null; then
+		sudo yum install -y git-lfs ||
+			die "通过 yum 安装 git-lfs 失败，请手动: sudo yum install -y git-lfs"
+	elif command -v pacman &>/dev/null; then
+		sudo pacman -S --noconfirm git-lfs ||
+			die "通过 pacman 安装 git-lfs 失败，请手动: sudo pacman -S git-lfs"
+	else
+		die "未找到 git-lfs，且无法自动安装（无 apt-get/dnf/yum/pacman）。请自行安装 git-lfs 后重试。"
+	fi
+	git lfs version &>/dev/null || die "安装后 git lfs 仍不可用，请检查 PATH 与安装日志"
+	echo "git-lfs 已可用: $(git lfs version 2>/dev/null | head -1)"
+}
+
+# 按 h3/h5 仅检查本流程需要的压缩包；异常时安装 git-lfs 并 git lfs pull
+ensure_tools_git_lfs_archives() {
+	local target="$1"
+	local archives=()
+	case "$target" in
+	h5)
+		archives=(
+			"$TOOLS_DIR/arm-gnu-toolchain-15.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
+			"$TOOLS_DIR/or1k-linux-musl-7.2.0-20180317.tar.gz"
+		)
+		;;
+	h3)
+		archives=(
+			"$TOOLS_DIR/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-linux-gnueabihf.tar.xz"
+		)
+		;;
+	*)
+		return 0
+		;;
+	esac
+
+	local need=0 a
+	for a in "${archives[@]}"; do
+		if _archive_needs_git_lfs_pull "$a"; then
+			need=1
+			break
+		fi
+	done
+	[[ "$need" -eq 0 ]] && return 0
+
+	if [[ -n "${LOIS_SKIP_GIT_LFS:-}" ]]; then
+		die "tools 工具链包未就绪（LFS 指针或过小），但已设置 LOIS_SKIP_GIT_LFS，跳过自动拉取。请自行放入完整压缩包或取消该变量。"
+	fi
+
+	echo "======== 检测到 tools 工具链包为 Git LFS 指针或未完整，将安装/使用 git-lfs 并拉取 ========"
+	if ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree &>/dev/null; then
+		die "无法自动拉取：$REPO_ROOT 不是 git 工作区。请将真实压缩包放入 tools/，或使用含 LFS 的 git clone。"
+	fi
+
+	ensure_git_lfs_cli || return 1
+	(
+		cd "$REPO_ROOT" || exit 1
+		git lfs install
+		git lfs pull
+	) || die "git lfs pull 失败。请检查网络、LFS 远端与凭证。"
+
+	for a in "${archives[@]}"; do
+		if _archive_needs_git_lfs_pull "$a"; then
+			die "git lfs pull 后仍异常（仍为指针或过小）: $a"
+		fi
+	done
+	echo "======== tools 大文件已通过 Git LFS 就绪 ========"
 }
 
 warn_missing_host_tools() {
@@ -58,10 +202,10 @@ ensure_arm32_toolchain() {
 	elif command -v arm-none-linux-gnueabihf-gcc &>/dev/null; then
 		:
 	else
-		[[ -f "$archive" ]] || die "未找到 ARM32 工具链压缩包: $archive"
+		require_real_toolchain_archive "$archive" "ARM32 工具链压缩包"
 		echo "正在解压 ARM32 工具链到 $dir ..."
 		mkdir -p "$dir"
-		tar -xJf "$archive" -C "$dir" --strip-components=1 || die "ARM32 工具链解压失败"
+		tar -xJf "$archive" -C "$dir" --strip-components=1 || die "ARM32 工具链解压失败（请确认 tar 支持 -J/xz，且压缩包完整）"
 		[[ -x "$gcc_local" ]] || die "解压后未找到: $gcc_local"
 		export PATH="$dir/bin:$PATH"
 	fi
@@ -79,10 +223,10 @@ ensure_aarch64_toolchain() {
 	elif command -v aarch64-none-linux-gnu-gcc &>/dev/null; then
 		:
 	else
-		[[ -f "$archive" ]] || die "未找到 AArch64 工具链压缩包: $archive"
+		require_real_toolchain_archive "$archive" "AArch64 工具链压缩包"
 		echo "正在解压 AArch64 工具链到 $dir ..."
 		mkdir -p "$dir"
-		tar -xJf "$archive" -C "$dir" --strip-components=1 || die "AArch64 工具链解压失败"
+		tar -xJf "$archive" -C "$dir" --strip-components=1 || die "AArch64 工具链解压失败（请确认 tar 支持 -J/xz，且压缩包完整）"
 		[[ -x "$gcc_local" ]] || die "解压后未找到: $gcc_local"
 		export PATH="$dir/bin:$PATH"
 	fi
@@ -100,7 +244,7 @@ ensure_or1k_toolchain() {
 	elif command -v or1k-linux-musl-gcc &>/dev/null; then
 		:
 	else
-		[[ -f "$archive" ]] || die "未找到 or1k 工具链压缩包: $archive"
+		require_real_toolchain_archive "$archive" "or1k 工具链压缩包"
 		echo "正在解压 or1k 工具链到 $dir ..."
 		mkdir -p "$dir"
 		if ! tar -xzf "$archive" -C "$dir" --strip-components=1 2>/dev/null; then
@@ -424,6 +568,8 @@ _lois_main_inner() {
 	warn_missing_host_tools
 	mkdir -p "$BUILD_ROOT/h3" "$BUILD_ROOT/h5"
 	export GCC_COLORS=auto
+
+	ensure_tools_git_lfs_archives "$target" || return 1
 
 	if [[ "$target" == "h5" ]]; then
 		ensure_aarch64_toolchain || return 1
