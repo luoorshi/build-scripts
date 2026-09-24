@@ -2,8 +2,8 @@
 # 生成 SD 卡 .img（需 sudo：分区、格式化、挂载、写入 SPL）。
 # 用法（仓库根目录）：bash build-scripts/make-img.sh h3
 #                    bash build-scripts/make-img.sh h5
-# 依赖：编译流程已跑过且 build/h3|h5 下已有 u-boot 产物；可选环境变量 KERNEL_IMAGE、DTB_PATH、
-# BOOT_CMD（生成 boot.scr）、BOOT_SCR 与主脚本 README 说明一致。
+# 依赖：编译流程已跑过且 build/h3|h5 下已有 u-boot（及建议有 Image/dtb）；可选环境变量 KERNEL_IMAGE、DTB_PATH、
+# BOOT_CMD（生成 boot.scr）、BOOT_SCR 与主脚本 README 说明一致。未设置时优先用 build/<soc>/ 归档，再回退 linux/ 树。
 
 set -euo pipefail
 
@@ -15,19 +15,39 @@ die() {
 	exit 1
 }
 
-# 若用户未设置，则使用仓库内默认内核/DTB 路径，供 make_sdcard_img 复制到 boot 分区
+# 若用户未设置，优先使用 build/<soc>/ 归档产物，否则回退到 linux/ 树内路径
 export_default_kernel_paths() {
 	local soc="$1"
 	if [[ "$soc" == "h5" ]]; then
-		[[ -z "${KERNEL_IMAGE:-}" && -f "$REPO_ROOT/linux/arch/arm64/boot/Image" ]] &&
-			export KERNEL_IMAGE="$REPO_ROOT/linux/arch/arm64/boot/Image"
-		[[ -z "${DTB_PATH:-}" && -f "$REPO_ROOT/linux/arch/arm64/boot/dts/allwinner/sun50i-h5-quark-luoorshi.dtb" ]] &&
-			export DTB_PATH="$REPO_ROOT/linux/arch/arm64/boot/dts/allwinner/sun50i-h5-quark-luoorshi.dtb"
+		if [[ -z "${KERNEL_IMAGE:-}" ]]; then
+			if [[ -f "$BUILD_ROOT/h5/Image" ]]; then
+				export KERNEL_IMAGE="$BUILD_ROOT/h5/Image"
+			elif [[ -f "$REPO_ROOT/linux/arch/arm64/boot/Image" ]]; then
+				export KERNEL_IMAGE="$REPO_ROOT/linux/arch/arm64/boot/Image"
+			fi
+		fi
+		if [[ -z "${DTB_PATH:-}" ]]; then
+			if [[ -f "$BUILD_ROOT/h5/sun50i-h5-quark-luoorshi.dtb" ]]; then
+				export DTB_PATH="$BUILD_ROOT/h5/sun50i-h5-quark-luoorshi.dtb"
+			elif [[ -f "$REPO_ROOT/linux/arch/arm64/boot/dts/allwinner/sun50i-h5-quark-luoorshi.dtb" ]]; then
+				export DTB_PATH="$REPO_ROOT/linux/arch/arm64/boot/dts/allwinner/sun50i-h5-quark-luoorshi.dtb"
+			fi
+		fi
 	elif [[ "$soc" == "h3" ]]; then
-		[[ -z "${KERNEL_IMAGE:-}" && -f "$REPO_ROOT/linux/arch/arm/boot/Image" ]] &&
-			export KERNEL_IMAGE="$REPO_ROOT/linux/arch/arm/boot/Image"
-		[[ -z "${DTB_PATH:-}" && -f "$REPO_ROOT/linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb" ]] &&
-			export DTB_PATH="$REPO_ROOT/linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb"
+		if [[ -z "${KERNEL_IMAGE:-}" ]]; then
+			if [[ -f "$BUILD_ROOT/h3/Image" ]]; then
+				export KERNEL_IMAGE="$BUILD_ROOT/h3/Image"
+			elif [[ -f "$REPO_ROOT/linux/arch/arm/boot/Image" ]]; then
+				export KERNEL_IMAGE="$REPO_ROOT/linux/arch/arm/boot/Image"
+			fi
+		fi
+		if [[ -z "${DTB_PATH:-}" ]]; then
+			if [[ -f "$BUILD_ROOT/h3/sun8i-h3-quark-luoorshi.dtb" ]]; then
+				export DTB_PATH="$BUILD_ROOT/h3/sun8i-h3-quark-luoorshi.dtb"
+			elif [[ -f "$REPO_ROOT/linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb" ]]; then
+				export DTB_PATH="$REPO_ROOT/linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb"
+			fi
+		fi
 	fi
 }
 

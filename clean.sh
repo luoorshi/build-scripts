@@ -31,7 +31,7 @@ lois_strip_toolchain_path() {
 	export PATH="$newpath"
 }
 
-# 取消由 lois_buidl_tools.sh 或手工导出、可能导致 H3/H5 混用的变量
+# 取消由 buidl_tools.sh 或手工导出、可能导致 H3/H5 混用的变量
 lois_clean_environment() {
 	unset BL31 SCP CROSS_COMPILE ARCH MAKE_VERBOSE KERNEL_IMAGE DTB_PATH BOOT_SCR BOOT_CMD 2>/dev/null || true
 	unset CRUST_DEFCONFIG JOBS GCC_COLORS HOST_COMPILE INSTALL_MOD_PATH 2>/dev/null || true
@@ -59,7 +59,7 @@ fi
 if [[ "${1:-}" == "--env-only" ]]; then
 	lois_clean_environment
 	echo "======== 已在子 shell 清理环境变量（父 shell 未变）========"
-	echo "若曾在当前终端 source 过 lois_buidl_tools.sh，请在仓库根执行:"
+	echo "若曾在当前终端 source 过 buidl_tools.sh，请在仓库根执行:"
 	echo "  . build-scripts/clean.sh --env-only"
 	exit 0
 fi
@@ -118,5 +118,5 @@ else
 fi
 
 echo "======== 完成（tools 下已解压工具链未删除）========"
-echo "若本终端曾 source lois_buidl_tools.sh，建议在仓库根执行以清理当前 shell:"
+echo "若本终端曾 source buidl_tools.sh，建议在仓库根执行以清理当前 shell:"
 echo "  . build-scripts/clean.sh --env-only"

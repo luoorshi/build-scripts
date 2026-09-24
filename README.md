@@ -2,13 +2,14 @@
 
 本目录提供 Quark-N（全志 H3 / H5）在 **Linux** 下的统一编译与清理脚本。镜像制作步骤与分区布局与 [H5制作镜像详细指南.md](H5制作镜像详细指南.md) 一致，并已改为使用 `losetup --find` 动态分配 loop 设备。
 
-**说明**：脚本文件名 **`lois_buidl_tools.sh`** 按约定保留此拼写（`buidl`），请勿与 `build` 混淆。
+**说明**：脚本文件名 **`buidl_tools.sh`** 按约定保留此拼写（`buidl`），请勿与 `build` 混淆。
 
 ## 脚本一览
 
 | 文件 | 作用 |
 |------|------|
-| [lois_buidl_tools.sh](lois_buidl_tools.sh) | 按参数编译 H3 或 H5（含 u-boot、linux 内核；H5 另含 ATF/Crust），复制产物到 `build/`，并生成 SD 卡镜像 `.img` |
+| [buidl_tools.sh](buidl_tools.sh) | 按参数编译 H3 或 H5（含 u-boot、linux 内核；H5 另含 ATF/Crust），复制产物到 `build/<soc>/` |
+| [make-img.sh](make-img.sh) | 单独生成 SD 卡镜像 `.img`（需 sudo；优先使用 `build/<soc>/` 下的 Image/dtb） |
 | [clean.sh](clean.sh) | 对 u-boot、ATF、crust、linux 执行清理，并删除仓库根目录 `build/` |
 
 ## 运行环境
@@ -30,21 +31,21 @@
 
 **`clean.sh` 不会删除**上述已解压目录。
 
-## 使用 `lois_buidl_tools.sh`
+## 使用 `buidl_tools.sh`
 
 在**仓库根目录**执行（支持 **source**，失败时 **`return`** 而非 **`exit`**，避免关闭当前 shell）。无论是否 source，脚本结束后会 **`cd` 回执行前的当前目录**，避免终端留在 `linux/`、`u-boot/` 等子目录。
 
 ```bash
-. build-scripts/lois_buidl_tools.sh h3          # H3：u-boot + kernel
-. build-scripts/lois_buidl_tools.sh h3 debug    # 同上，make 增加 V=1
-. build-scripts/lois_buidl_tools.sh h5
-. build-scripts/lois_buidl_tools.sh h5 debug
+. build-scripts/buidl_tools.sh h3          # H3：u-boot + kernel
+. build-scripts/buidl_tools.sh h3 debug    # 同上，make 增加 V=1
+. build-scripts/buidl_tools.sh h5
+. build-scripts/buidl_tools.sh h5 debug
 ```
 
 也可直接执行：
 
 ```bash
-bash build-scripts/lois_buidl_tools.sh h5
+bash build-scripts/buidl_tools.sh h5
 ```
 
 ### 参数
@@ -78,23 +79,33 @@ bash build-scripts/lois_buidl_tools.sh h5
 ### Linux 内核与镜像中的 boot 分区
 
 - 编译日志：`build/h3/kernel-build.log`、`build/h5/kernel-build.log`。
-- 若你**未**事先设置 **`KERNEL_IMAGE`** / **`DTB_PATH`**，脚本在编译成功后会自动使用默认路径：
-  - **H5**：`linux/arch/arm64/boot/Image`，`linux/arch/arm64/boot/dts/allwinner/sun50i-h5-quark-luoorshi.dtb`
-  - **H3**：`linux/arch/arm/boot/Image`，`linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb`  
-  导出上述变量后，制作 `.img` 时会把内核复制为 `Image`，dtb 复制为 **`sun50i-h5-quark-luoorshi.dtb`**（H5）或 **`sun8i-h3-quark-luoorshi.dtb`**（H3）。你也可在运行前自行 `export` 覆盖路径。
+- **编译成功后**会把内核与 DTB **复制到** `build/<soc>/`（见下表）。`make-img.sh` 在未设置环境变量时的查找顺序为：
+  1. **`build/<soc>/Image`**、**`build/<soc>/<dtb 文件名>`**（优先）
+  2. 回退：`linux/arch/.../boot/Image` 与对应 dts 路径下的 dtb  
+  制作 `.img` 时会把内核复制为 `Image`，dtb 复制为 **`sun50i-h5-quark-luoorshi.dtb`**（H5）或 **`sun8i-h3-quark-luoorshi.dtb`**（H3）。可在运行前 `export KERNEL_IMAGE` / `DTB_PATH` 覆盖。
+
+> **注意**：内核 `.ko` 模块仍留在 `linux/` 树内（`make modules`），**不会**整包复制到 `build/`。若要把模块装进 rootfs，需另行 `make modules_install INSTALL_MOD_PATH=...`（见指南）。
 
 ## 产物与镜像输出
 
-- 目录：**`build/`**（仓库根下）
-  - **`build/h3/`**：`u-boot-sunxi-with-spl-h3.bin` 等；`u-boot-build.log`、`kernel-build.log`。
-  - **`build/h5/`**：`u-boot-sunxi-with-spl-h5.bin`，以及可选归档 `bl31.bin`、`scp.bin`；`u-boot-build.log`、`kernel-build.log`。
-- 镜像文件：
+- 目录：**`build/`**（仓库根下）。**仅创建当前编译目标的子目录**（编 `h3` 只建 `build/h3/`，编 `h5` 只建 `build/h5/`）。
+  - **`build/h3/`**：
+    - `u-boot-sunxi-with-spl-h3.bin`
+    - `Image`、`sun8i-h3-quark-luoorshi.dtb`
+    - 可选：`System.map`、`kernel.config`
+    - 日志：`u-boot-build.log`、`kernel-build.log`
+  - **`build/h5/`**：
+    - `u-boot-sunxi-with-spl-h5.bin`、`bl31.bin`、`scp.bin`
+    - `Image`、`sun50i-h5-quark-luoorshi.dtb`
+    - 可选：`System.map`、`kernel.config`
+    - 日志：`u-boot-build.log`、`kernel-build.log`
+- 镜像文件（由 **`make-img.sh`** 生成，**不**由 `buidl_tools.sh` 自动生成）：
   - **`build/quark-n-h3-sdcard.img`**
   - **`build/quark-n-h5-sdcard.img`**
 
 镜像流程：`dd` 创建约 2048MiB 空文件 → `parted` MBR → 分区 1：FAT32（1MiB–256MiB）→ 分区 2：ext4（剩余）→ `losetup --find --show --partscan` → 格式化 →（可选）复制启动文件 → 卸载 → **`dd` 烧录 u-boot** 到 loop 设备 **`bs=1k seek=8 conv=notrunc`**（与指南一致）。
 
-若内核未编译成功或默认路径下没有 `Image`/dtb，且你也未通过环境变量提供文件，则 boot 分区可能仅有格式化结果；脚本会打印提示，可按 [H5制作镜像详细指南.md](H5制作镜像详细指南.md) 手工补齐。
+若内核未编译成功或 `build/<soc>/` 与 `linux/` 下都没有 `Image`/dtb，且你也未通过环境变量提供文件，则 boot 分区可能仅有格式化结果；脚本会打印提示，可按 [H5制作镜像详细指南.md](H5制作镜像详细指南.md) 手工补齐。
 
 ### 可选环境变量（内核 / 启动脚本）
 
@@ -111,7 +122,7 @@ bash build-scripts/lois_buidl_tools.sh h5
 export KERNEL_IMAGE=/path/to/Image
 export DTB_PATH=/path/to/board.dtb
 export BOOT_CMD=/path/to/boot.cmd
-. build-scripts/lois_buidl_tools.sh h5
+. build-scripts/buidl_tools.sh h5
 ```
 
 ## 使用 `clean.sh`
@@ -122,9 +133,9 @@ export BOOT_CMD=/path/to/boot.cmd
 bash build-scripts/clean.sh
 ```
 
-脚本在**执行磁盘清理前**会先在本进程内清理与 `lois_buidl_tools.sh` / H3 / H5 相关的环境变量，并从 `PATH` 中去掉本仓库下的三套工具链 `bin` 目录（`15.2.rel1-arm`、`15.2.rel1-arm64`、`or1k-linux-musl-7.2.0`），避免 `CROSS_COMPILE`、`BL31`、`SCP` 等与错误工具链残留在环境中干扰 `make`。
+脚本在**执行磁盘清理前**会先在本进程内清理与 `buidl_tools.sh` / H3 / H5 相关的环境变量，并从 `PATH` 中去掉本仓库下的三套工具链 `bin` 目录（`15.2.rel1-arm`、`15.2.rel1-arm64`、`or1k-linux-musl-7.2.0`），避免 `CROSS_COMPILE`、`BL31`、`SCP` 等与错误工具链残留在环境中干扰 `make`。
 
-若你曾在**同一终端**里用 `. build-scripts/lois_buidl_tools.sh ...` 编译，父 shell 的 `PATH` 仍可能带工具链前缀；切换 H3/H5 或清理前建议在仓库根执行：
+若你曾在**同一终端**里用 `. build-scripts/buidl_tools.sh ...` 编译，父 shell 的 `PATH` 仍可能带工具链前缀；切换 H3/H5 或清理前建议在仓库根执行：
 
 ```bash
 . build-scripts/clean.sh --env-only
@@ -150,10 +161,10 @@ bash build-scripts/clean.sh
 
 | 指南中的操作 | 本脚本中的实现 |
 |--------------|----------------|
-| `dd` / `parted` 分区 | `lois_buidl_tools.sh` 内 sudo 段落 |
+| `dd` / `parted` 分区 | `make-img.sh` 内 sudo 段落 |
 | `losetup /dev/loop0` | 改为 `losetup --find --show --partscan` |
 | `mkfs.vfat` / `mkfs.ext4` | 同上 |
-| 复制 Image、dtb、boot.scr | 由 `KERNEL_IMAGE`、`DTB_PATH`、`BOOT_SCR` / `BOOT_CMD` 控制 |
+| 复制 Image、dtb、boot.scr | 由 `KERNEL_IMAGE`、`DTB_PATH`、`BOOT_SCR` / `BOOT_CMD` 控制（默认优先 `build/<soc>/`） |
 | `dd` 烧录 u-boot `seek=8` | 同上 |
 
 更完整的 rootfs、chroot、模块安装等仍请参考指南正文。

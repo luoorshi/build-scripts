@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 统一编译入口：H3（u-boot + kernel）/ H5（ATF + crust + u-boot + kernel）。支持 source 执行。
 # SD 卡 .img 需单独执行 build-scripts/make-img.sh（内含 sudo，默认不在本脚本中运行）。
-# 用法（仓库根目录）：. build-scripts/lois_buidl_tools.sh h3 [debug]
-#                    . build-scripts/lois_buidl_tools.sh h5 [debug]
+# 用法（仓库根目录）：. build-scripts/buidl_tools.sh h3 [debug]
+#                    . build-scripts/buidl_tools.sh h5 [debug]
 # tools 下工具链若为 Git LFS：脚本会检测指针/过小文件，必要时自动安装 git-lfs（apt/dnf/yum/pacman，需 sudo）并执行 git lfs pull。
 # 禁用自动拉取：export LOIS_SKIP_GIT_LFS=1
 
@@ -269,12 +269,12 @@ build_atf() {
 	local vflag=()
 	[[ -n "${MAKE_VERBOSE:-}" ]] && vflag=(V=1)
 	echo "======== 编译 ATF (bl31) ========"
-	cd "$REPO_ROOT/arm-trusted-firmware" || die "无法进入 arm-trusted-firmware"
+	cd "$REPO_ROOT/arm-trusted-firmware" || { die "无法进入 arm-trusted-firmware"; return 1; }
 	export PATH="$TOOLS_DIR/15.2.rel1-arm64/bin:$PATH"
-	command -v aarch64-none-linux-gnu-gcc &>/dev/null || die "ATF 需要 aarch64-none-linux-gnu-gcc 在 PATH 中"
-	make "${vflag[@]}" CROSS_COMPILE=aarch64-none-linux-gnu- PLAT=sun50i_a64 bl31 || die "ATF 编译失败"
+	command -v aarch64-none-linux-gnu-gcc &>/dev/null || { die "ATF 需要 aarch64-none-linux-gnu-gcc 在 PATH 中"; return 1; }
+	make "${vflag[@]}" CROSS_COMPILE=aarch64-none-linux-gnu- PLAT=sun50i_a64 bl31 || { die "ATF 编译失败"; return 1; }
 	local out="$REPO_ROOT/arm-trusted-firmware/build/sun50i_a64/release/bl31.bin"
-	[[ -f "$out" ]] || die "未生成 bl31.bin: $out"
+	[[ -f "$out" ]] || { die "未生成 bl31.bin: $out"; return 1; }
 }
 
 build_crust() {
@@ -285,7 +285,7 @@ build_crust() {
 	local bak="${or1k_mk}.lois_bak"
 
 	echo "======== 编译 Crust (scp) defconfig=$def ========"
-	[[ -f "$or1k_mk" ]] || die "未找到 $or1k_mk"
+	[[ -f "$or1k_mk" ]] || { die "未找到 $or1k_mk"; return 1; }
 
 	# 临时注释 or1k CFLAGS 中与老旧 or1k-linux-musl 不兼容的一行（见 tools/README.md），子 shell 退出时必恢复
 	(
@@ -299,97 +299,129 @@ build_crust() {
 		make "$def" || exit 1
 		make "${vflag[@]}" CROSS_COMPILE=or1k-linux-musl- HOST_COMPILE= || exit 1
 		[[ -f "$REPO_ROOT/crust/build/scp/scp.bin" ]] || exit 1
-	) || die "Crust 编译失败"
+	) || { die "Crust 编译失败"; return 1; }
 
-	[[ -f "$REPO_ROOT/crust/build/scp/scp.bin" ]] || die "未生成 scp.bin"
+	[[ -f "$REPO_ROOT/crust/build/scp/scp.bin" ]] || { die "未生成 scp.bin"; return 1; }
 }
 
 build_uboot_h5() {
-	local n vflag=()
+	local n vflag=() st
 	n=$(detect_jobs)
 	[[ -n "${MAKE_VERBOSE:-}" ]] && vflag=(V=1)
 	echo "======== 编译 U-Boot (H5) ========"
-	cd "$REPO_ROOT/u-boot" || die "无法进入 u-boot"
+	cd "$REPO_ROOT/u-boot" || { die "无法进入 u-boot"; return 1; }
 	export BL31="$REPO_ROOT/arm-trusted-firmware/build/sun50i_a64/release/bl31.bin"
 	export SCP="$REPO_ROOT/crust/build/scp/scp.bin"
-	[[ -f "$BL31" ]] || die "缺少 BL31: $BL31"
-	[[ -f "$SCP" ]] || die "缺少 SCP: $SCP"
-	command -v aarch64-none-linux-gnu-gcc &>/dev/null || die "U-Boot H5 需要 aarch64-none-linux-gnu-gcc"
+	[[ -f "$BL31" ]] || { die "缺少 BL31: $BL31"; return 1; }
+	[[ -f "$SCP" ]] || { die "缺少 SCP: $SCP"; return 1; }
+	command -v aarch64-none-linux-gnu-gcc &>/dev/null || { die "U-Boot H5 需要 aarch64-none-linux-gnu-gcc"; return 1; }
 	# make clean || die "u-boot make clean 失败"
-	make quark-luoorshi-h5_defconfig ARCH=arm CROSS_COMPILE=aarch64-none-linux-gnu- || die "u-boot defconfig 失败"
+	make quark-luoorshi-h5_defconfig ARCH=arm CROSS_COMPILE=aarch64-none-linux-gnu- || { die "u-boot defconfig 失败"; return 1; }
 	set +o pipefail
 	make ARCH=arm CROSS_COMPILE=aarch64-none-linux-gnu- "${vflag[@]}" -j"$n" 2>&1 | tee "$BUILD_ROOT/h5/u-boot-build.log"
-	local st="${PIPESTATUS[0]}"
+	st="${PIPESTATUS[0]}"
 	set -o pipefail 2>/dev/null || true
-	[[ "$st" -eq 0 ]] || die "u-boot 编译失败 (exit $st)"
-	[[ -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" ]] || die "未生成 u-boot-sunxi-with-spl.bin"
+	[[ "$st" -eq 0 ]] || { die "u-boot 编译失败 (exit $st)"; return 1; }
+	[[ -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" ]] || { die "未生成 u-boot-sunxi-with-spl.bin"; return 1; }
 }
 
 build_uboot_h3() {
-	local n vflag=()
+	local n vflag=() st
 	n=$(detect_jobs)
 	[[ -n "${MAKE_VERBOSE:-}" ]] && vflag=(V=1)
 	echo "======== 编译 U-Boot (H3) ========"
-	cd "$REPO_ROOT/u-boot" || die "无法进入 u-boot"
-	command -v arm-none-linux-gnueabihf-gcc &>/dev/null || die "U-Boot H3 需要 arm-none-linux-gnueabihf-gcc"
+	cd "$REPO_ROOT/u-boot" || { die "无法进入 u-boot"; return 1; }
+	command -v arm-none-linux-gnueabihf-gcc &>/dev/null || { die "U-Boot H3 需要 arm-none-linux-gnueabihf-gcc"; return 1; }
 	# make clean || die "u-boot make clean 失败"
-	make quark-luoorshi-h3_defconfig ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- || die "u-boot defconfig 失败"
+	make quark-luoorshi-h3_defconfig ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- || { die "u-boot defconfig 失败"; return 1; }
 	set +o pipefail
 	make ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- "${vflag[@]}" -j"$n" 2>&1 | tee "$BUILD_ROOT/h3/u-boot-build.log"
-	local st="${PIPESTATUS[0]}"
+	st="${PIPESTATUS[0]}"
 	set -o pipefail 2>/dev/null || true
-	[[ "$st" -eq 0 ]] || die "u-boot 编译失败 (exit $st)"
-	[[ -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" ]] || die "未生成 u-boot-sunxi-with-spl.bin"
+	[[ "$st" -eq 0 ]] || { die "u-boot 编译失败 (exit $st)"; return 1; }
+	[[ -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" ]] || { die "未生成 u-boot-sunxi-with-spl.bin"; return 1; }
 }
 
 # 内联 linux/Quark-n-H5-build.sh，不调用该脚本
 build_kernel_h5() {
-	local n vflag=()
+	local n vflag=() st img dtb
 	n=$(detect_jobs)
 	[[ -n "${MAKE_VERBOSE:-}" ]] && vflag=(V=1)
+	img="$REPO_ROOT/linux/arch/arm64/boot/Image"
+	dtb="$REPO_ROOT/linux/arch/arm64/boot/dts/allwinner/sun50i-h5-quark-luoorshi.dtb"
 	echo "======== 编译 Linux 内核 (H5) ========"
-	cd "$REPO_ROOT/linux" || die "无法进入 linux"
-	command -v aarch64-none-linux-gnu-gcc &>/dev/null || die "内核 H5 需要 aarch64-none-linux-gnu-gcc"
-	make quark-luoorshi-h5_defconfig ARCH=arm64 || die "kernel defconfig 失败"
-	make olddefconfig ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu- || die "kernel olddefconfig 失败"
+	cd "$REPO_ROOT/linux" || { die "无法进入 linux"; return 1; }
+	command -v aarch64-none-linux-gnu-gcc &>/dev/null || { die "内核 H5 需要 aarch64-none-linux-gnu-gcc"; return 1; }
+	make quark-luoorshi-h5_defconfig ARCH=arm64 || { die "kernel defconfig 失败"; return 1; }
+	make olddefconfig ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu- || { die "kernel olddefconfig 失败"; return 1; }
+	# 删除旧 Image，避免 make 失败后仍因残留文件被误判为成功（source 场景尤甚）
+	rm -f "$img"
 	set +o pipefail
 	make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu- "${vflag[@]}" -j"$n" Image dtbs modules 2>&1 | tee "$BUILD_ROOT/h5/kernel-build.log"
-	local st="${PIPESTATUS[0]}"
+	st="${PIPESTATUS[0]}"
 	set -o pipefail 2>/dev/null || true
-	[[ "$st" -eq 0 ]] || die "内核编译失败 (exit $st)"
-	[[ -f "$REPO_ROOT/linux/arch/arm64/boot/Image" ]] || die "未生成 arch/arm64/boot/Image"
+	[[ "$st" -eq 0 ]] || { die "内核编译失败 (exit $st)，详见 $BUILD_ROOT/h5/kernel-build.log"; return 1; }
+	[[ -f "$img" ]] || { die "未生成 arch/arm64/boot/Image"; return 1; }
+	[[ -f "$dtb" ]] || { die "未生成 DTB: $dtb"; return 1; }
 }
 
 # 内联 linux/Quark-n-H3-build.sh，不调用该脚本
 build_kernel_h3() {
-	local n vflag=()
+	local n vflag=() st img dtb
 	n=$(detect_jobs)
 	[[ -n "${MAKE_VERBOSE:-}" ]] && vflag=(V=1)
+	img="$REPO_ROOT/linux/arch/arm/boot/Image"
+	dtb="$REPO_ROOT/linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb"
 	echo "======== 编译 Linux 内核 (H3) ========"
-	cd "$REPO_ROOT/linux" || die "无法进入 linux"
-	command -v arm-none-linux-gnueabihf-gcc &>/dev/null || die "内核 H3 需要 arm-none-linux-gnueabihf-gcc"
-	make quark-luoorshi-h3_defconfig ARCH=arm || die "kernel defconfig 失败"
-	make olddefconfig ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- || die "kernel olddefconfig 失败"
+	cd "$REPO_ROOT/linux" || { die "无法进入 linux"; return 1; }
+	command -v arm-none-linux-gnueabihf-gcc &>/dev/null || { die "内核 H3 需要 arm-none-linux-gnueabihf-gcc"; return 1; }
+	make quark-luoorshi-h3_defconfig ARCH=arm || { die "kernel defconfig 失败"; return 1; }
+	make olddefconfig ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- || { die "kernel olddefconfig 失败"; return 1; }
+	# 删除旧 Image，避免 make 失败后仍因残留文件被误判为成功（source 场景尤甚）
+	rm -f "$img"
 	set +o pipefail
 	make ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- "${vflag[@]}" -j"$n" Image dtbs modules 2>&1 | tee "$BUILD_ROOT/h3/kernel-build.log"
-	local st="${PIPESTATUS[0]}"
+	st="${PIPESTATUS[0]}"
 	set -o pipefail 2>/dev/null || true
-	[[ "$st" -eq 0 ]] || die "内核编译失败 (exit $st)"
-	[[ -f "$REPO_ROOT/linux/arch/arm/boot/Image" ]] || die "未生成 arch/arm/boot/Image"
+	[[ "$st" -eq 0 ]] || { die "内核编译失败 (exit $st)，详见 $BUILD_ROOT/h3/kernel-build.log"; return 1; }
+	[[ -f "$img" ]] || { die "未生成 arch/arm/boot/Image"; return 1; }
+	[[ -f "$dtb" ]] || { die "未生成 DTB: $dtb"; return 1; }
 }
 
 copy_artifacts_h5() {
+	local img dtb bl31 scp
+	img="$REPO_ROOT/linux/arch/arm64/boot/Image"
+	dtb="$REPO_ROOT/linux/arch/arm64/boot/dts/allwinner/sun50i-h5-quark-luoorshi.dtb"
+	bl31="$REPO_ROOT/arm-trusted-firmware/build/sun50i_a64/release/bl31.bin"
+	scp="$REPO_ROOT/crust/build/scp/scp.bin"
 	mkdir -p "$BUILD_ROOT/h5"
-	cp -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" "$BUILD_ROOT/h5/u-boot-sunxi-with-spl-h5.bin" || die "复制 u-boot 失败"
-	cp -f "$REPO_ROOT/arm-trusted-firmware/build/sun50i_a64/release/bl31.bin" "$BUILD_ROOT/h5/bl31.bin" 2>/dev/null || true
-	cp -f "$REPO_ROOT/crust/build/scp/scp.bin" "$BUILD_ROOT/h5/scp.bin" 2>/dev/null || true
-	echo "产物已复制到 $BUILD_ROOT/h5/"
+	cp -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" "$BUILD_ROOT/h5/u-boot-sunxi-with-spl-h5.bin" || { die "复制 u-boot 失败"; return 1; }
+	[[ -f "$bl31" ]] || { die "缺少 bl31.bin，无法归档: $bl31"; return 1; }
+	[[ -f "$scp" ]] || { die "缺少 scp.bin，无法归档: $scp"; return 1; }
+	cp -f "$bl31" "$BUILD_ROOT/h5/bl31.bin" || { die "复制 bl31.bin 失败"; return 1; }
+	cp -f "$scp" "$BUILD_ROOT/h5/scp.bin" || { die "复制 scp.bin 失败"; return 1; }
+	[[ -f "$img" ]] || { die "缺少内核 Image，无法归档: $img"; return 1; }
+	[[ -f "$dtb" ]] || { die "缺少 DTB，无法归档: $dtb"; return 1; }
+	cp -f "$img" "$BUILD_ROOT/h5/Image" || { die "复制 Image 失败"; return 1; }
+	cp -f "$dtb" "$BUILD_ROOT/h5/sun50i-h5-quark-luoorshi.dtb" || { die "复制 dtb 失败"; return 1; }
+	cp -f "$REPO_ROOT/linux/System.map" "$BUILD_ROOT/h5/System.map" 2>/dev/null || true
+	cp -f "$REPO_ROOT/linux/.config" "$BUILD_ROOT/h5/kernel.config" 2>/dev/null || true
+	echo "产物已复制到 $BUILD_ROOT/h5/ （含 u-boot、bl31、scp、Image、dtb）"
 }
 
 copy_artifacts_h3() {
+	local img dtb
+	img="$REPO_ROOT/linux/arch/arm/boot/Image"
+	dtb="$REPO_ROOT/linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb"
 	mkdir -p "$BUILD_ROOT/h3"
-	cp -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" "$BUILD_ROOT/h3/u-boot-sunxi-with-spl-h3.bin" || die "复制 u-boot 失败"
-	echo "产物已复制到 $BUILD_ROOT/h3/"
+	cp -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" "$BUILD_ROOT/h3/u-boot-sunxi-with-spl-h3.bin" || { die "复制 u-boot 失败"; return 1; }
+	[[ -f "$img" ]] || { die "缺少内核 Image，无法归档: $img"; return 1; }
+	[[ -f "$dtb" ]] || { die "缺少 DTB，无法归档: $dtb"; return 1; }
+	cp -f "$img" "$BUILD_ROOT/h3/Image" || { die "复制 Image 失败"; return 1; }
+	cp -f "$dtb" "$BUILD_ROOT/h3/sun8i-h3-quark-luoorshi.dtb" || { die "复制 dtb 失败"; return 1; }
+	cp -f "$REPO_ROOT/linux/System.map" "$BUILD_ROOT/h3/System.map" 2>/dev/null || true
+	cp -f "$REPO_ROOT/linux/.config" "$BUILD_ROOT/h3/kernel.config" 2>/dev/null || true
+	echo "产物已复制到 $BUILD_ROOT/h3/ （含 u-boot、Image、dtb）"
 }
 
 # 实际构建逻辑（会多次 cd）；由 lois_main 包装以在结束时恢复调用前的工作目录（source 时终端路径不变）
@@ -400,9 +432,8 @@ _lois_main_inner() {
 	case "$target" in
 	h3 | h5) ;;
 	*)
-		echo "用法: . build-scripts/lois_buidl_tools.sh <h3|h5> [debug]" >&2
-		die "缺少或无效参数: 需要 h3 或 h5"
-		return 1
+		echo "用法: . build-scripts/buidl_tools.sh <h3|h5> [debug]" >&2
+		die "缺少或无效参数: 需要 h3 或 h5" || return 1
 		;;
 	esac
 
@@ -413,7 +444,8 @@ _lois_main_inner() {
 	fi
 
 	warn_missing_host_tools
-	mkdir -p "$BUILD_ROOT/h3" "$BUILD_ROOT/h5"
+	# 只创建当前编译目标目录，避免编 h3 时多出空的 build/h5（或反之）
+	mkdir -p "$BUILD_ROOT/$target"
 	export GCC_COLORS=auto
 
 	ensure_tools_git_lfs_archives "$target" || return 1
@@ -434,14 +466,19 @@ _lois_main_inner() {
 	fi
 
 	echo "======== 全部完成 ($target) ========"
+	echo "产物目录: $BUILD_ROOT/$target/ （应含 u-boot、Image、dtb 与 *.log）"
 	echo "提示: 默认不生成 SD 卡 .img。需要镜像时在仓库根执行: bash build-scripts/make-img.sh $target"
 }
 
 lois_main() {
-	local _lois_saved_pwd
+	local _lois_saved_pwd _st _lois_saved_shopts
+	# source 执行时顶层未 set -e；在本函数内临时打开，结束后用 set +o 快照恢复，避免污染调用方 shell
 	_lois_saved_pwd=$(pwd)
-	_lois_main_inner "$@"
-	local _st=$?
+	_lois_saved_shopts=$(set +o)
+	set -euo pipefail
+	_st=0
+	_lois_main_inner "$@" || _st=$?
+	eval "$_lois_saved_shopts" 2>/dev/null || true
 	builtin cd "$_lois_saved_pwd" 2>/dev/null || true
 	return "$_st"
 }
