@@ -371,20 +371,23 @@ build_kernel_h3() {
 	n=$(detect_jobs)
 	[[ -n "${MAKE_VERBOSE:-}" ]] && vflag=(V=1)
 	img="$REPO_ROOT/linux/arch/arm/boot/Image"
+	zimg="$REPO_ROOT/linux/arch/arm/boot/zImage"
 	dtb="$REPO_ROOT/linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb"
 	echo "======== 编译 Linux 内核 (H3) ========"
 	cd "$REPO_ROOT/linux" || { die "无法进入 linux"; return 1; }
 	command -v arm-none-linux-gnueabihf-gcc &>/dev/null || { die "内核 H3 需要 arm-none-linux-gnueabihf-gcc"; return 1; }
 	make quark-luoorshi-h3_defconfig ARCH=arm || { die "kernel defconfig 失败"; return 1; }
 	make olddefconfig ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- || { die "kernel olddefconfig 失败"; return 1; }
-	# 删除旧 Image，避免 make 失败后仍因残留文件被误判为成功（source 场景尤甚）
-	rm -f "$img"
+	# 删除旧 Image/zImage，避免 make 失败后仍因残留文件被误判为成功（source 场景尤甚）
+	rm -f "$img" "$zimg"
 	set +o pipefail
-	make ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- "${vflag[@]}" -j"$n" Image dtbs modules 2>&1 | tee "$BUILD_ROOT/h3/kernel-build.log"
+	# H3 U-Boot 无 booti，镜像用 bootz 启动 zImage。Image 仍保留，供核对未压缩内核。
+	make ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- "${vflag[@]}" -j"$n" Image zImage dtbs modules 2>&1 | tee "$BUILD_ROOT/h3/kernel-build.log"
 	st="${PIPESTATUS[0]}"
 	set -o pipefail 2>/dev/null || true
 	[[ "$st" -eq 0 ]] || { die "内核编译失败 (exit $st)，详见 $BUILD_ROOT/h3/kernel-build.log"; return 1; }
 	[[ -f "$img" ]] || { die "未生成 arch/arm/boot/Image"; return 1; }
+	[[ -f "$zimg" ]] || { die "未生成 arch/arm/boot/zImage"; return 1; }
 	[[ -f "$dtb" ]] || { die "未生成 DTB: $dtb"; return 1; }
 }
 
@@ -412,16 +415,19 @@ copy_artifacts_h5() {
 copy_artifacts_h3() {
 	local img dtb
 	img="$REPO_ROOT/linux/arch/arm/boot/Image"
+	zimg="$REPO_ROOT/linux/arch/arm/boot/zImage"
 	dtb="$REPO_ROOT/linux/arch/arm/boot/dts/allwinner/sun8i-h3-quark-luoorshi.dtb"
 	mkdir -p "$BUILD_ROOT/h3"
 	cp -f "$REPO_ROOT/u-boot/u-boot-sunxi-with-spl.bin" "$BUILD_ROOT/h3/u-boot-sunxi-with-spl-h3.bin" || { die "复制 u-boot 失败"; return 1; }
 	[[ -f "$img" ]] || { die "缺少内核 Image，无法归档: $img"; return 1; }
+	[[ -f "$zimg" ]] || { die "缺少内核 zImage，无法归档: $zimg"; return 1; }
 	[[ -f "$dtb" ]] || { die "缺少 DTB，无法归档: $dtb"; return 1; }
 	cp -f "$img" "$BUILD_ROOT/h3/Image" || { die "复制 Image 失败"; return 1; }
+	cp -f "$zimg" "$BUILD_ROOT/h3/zImage" || { die "复制 zImage 失败"; return 1; }
 	cp -f "$dtb" "$BUILD_ROOT/h3/sun8i-h3-quark-luoorshi.dtb" || { die "复制 dtb 失败"; return 1; }
 	cp -f "$REPO_ROOT/linux/System.map" "$BUILD_ROOT/h3/System.map" 2>/dev/null || true
 	cp -f "$REPO_ROOT/linux/.config" "$BUILD_ROOT/h3/kernel.config" 2>/dev/null || true
-	echo "产物已复制到 $BUILD_ROOT/h3/ （含 u-boot、Image、dtb）"
+	echo "产物已复制到 $BUILD_ROOT/h3/ （含 u-boot、Image、zImage、dtb）"
 }
 
 # 实际构建逻辑（会多次 cd）；由 lois_main 包装以在结束时恢复调用前的工作目录（source 时终端路径不变）
