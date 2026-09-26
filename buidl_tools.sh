@@ -473,7 +473,8 @@ _lois_main_inner() {
 
 	echo "======== 全部完成 ($target) ========"
 	echo "产物目录: $BUILD_ROOT/$target/ （应含 u-boot、Image、dtb 与 *.log）"
-	echo "提示: 默认不生成 SD 卡 .img。需要镜像时在仓库根执行: bash build-scripts/make-img.sh $target"
+	echo "提示: 默认不生成 SD 卡 .img。需要镜像时在仓库根执行: python3 build-scripts/makeimg.py $target"
+	echo "提示: 需要先安装 python3 和 pip3,且现有版本脚本需要sudo权限,建议使用docker容器来执行"
 }
 
 lois_main() {
