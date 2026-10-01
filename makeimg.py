@@ -26,6 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BUILD_ROOT = REPO_ROOT / "build"
 TOOLS_DIR = REPO_ROOT / "tools"
 LINUX_DIR = REPO_ROOT / "linux"
+# 编译 8723b.c 后，buidl_tools.sh 把固件拷到 build/<soc>/，打包时放进镜像根分区。
+STAGED_FW_REL = Path("lib/firmware/rtlwifi/rtl8723bu_nic.bin")
 
 # 与《H5制作镜像详细指南》一致：1MiB 之前留给 SPL/U-Boot，FAT 到 256MiB，其余给 ext4。
 BOOT_END_MIB = 256
@@ -448,7 +450,7 @@ def write_boot_script(soc: str) -> Path:
     kernel_file = info["kernel_file"]
     boot_cmd = info["boot_cmd"]
     content = (
-        'setenv bootargs "console=ttyS0,115200 root=/dev/mmcblk0p2 rootwait panic=10"\n'
+        'setenv bootargs "console=ttyS0,115200 root=/dev/mmcblk0p2 rootwait rw panic=10"\n'
         "setenv devtype mmc\n"
         "setenv devnum 0\n"
         "setenv distro_bootpart 1\n"
@@ -552,6 +554,21 @@ def toolchain_path(soc: str) -> str:
     if bindir.is_dir():
         return str(bindir) + os.pathsep + current
     return current
+
+
+def install_staged_firmware(soc: str, root_mount: str) -> None:
+    """把 build/<soc>/lib/firmware 合并进镜像根分区，不覆盖已有的 regulatory.db。"""
+    src = soc_dir(soc) / STAGED_FW_REL
+    if not src.is_file():
+        die(
+            f"没有找到 {src}。rtl8xxxu 启动时会请求 /{STAGED_FW_REL.as_posix()}。"
+            f"请先执行 buidl_tools.sh {soc}，由它把固件拷到该路径。"
+        )
+    dest_root = root_mount + "/lib/firmware"
+    log(f"======== 把 {soc} 固件装进镜像根分区 ========")
+    log(f"{src} -> {dest_root}/rtlwifi/rtl8723bu_nic.bin")
+    run(["sudo", "mkdir", "-p", dest_root])
+    run(["sudo", "cp", "-a", str(soc_dir(soc) / "lib" / "firmware") + "/.", dest_root + "/"])
 
 
 def install_modules(soc: str, root_mount: str) -> None:
@@ -722,6 +739,7 @@ def create_image(soc: str, artifacts: dict[str, Path], rootfs: Path, image_mib: 
     copy_rootfs(rootfs, root_point)
     run(["sudo", "mkdir", "-p", *(root_point + "/" + name for name in ("proc", "sys", "dev", "run", "tmp"))])
     run(["sudo", "chmod", "1777", root_point + "/tmp"])
+    install_staged_firmware(soc, root_point)
 
     if module_action == "install":
         install_modules(soc, root_point)
@@ -750,6 +768,7 @@ def write_manifest(soc: str, artifacts: dict[str, Path], rootfs: Path, rootfs_or
         f"rootfs={rootfs}",
         f"rootfs_origin={rootfs_origin}",
         f"modules={module_action}",
+        f"rtl8723bu_firmware={soc_dir(soc) / STAGED_FW_REL}",
         'bootargs=console=ttyS0,115200 root=/dev/mmcblk0p2 rootwait panic=10',
         "",
     ]

@@ -8,13 +8,16 @@
 
 | 文件 | 作用 |
 |------|------|
-| [buidl_tools.sh](buidl_tools.sh) | 按参数编译 H3 或 H5（含 u-boot、linux 内核；H5 另含 ATF/Crust），复制产物到 `build/<soc>/` |
-| [make-img.sh](make-img.sh) | 单独生成 SD 卡镜像 `.img`（需 sudo；优先使用 `build/<soc>/` 下的 Image/dtb） |
+| [buidl_tools.py](buidl_tools.py) | Python 编译入口。`h3` 或 `h5` 必填；`debug`、`img` 可选。带 `img` 时编译成功后在本进程内打包，不调用 `makeimg.py` |
+| [makeimg.py](makeimg.py) | 单独打包。不重新编译，使用已经放在 `build/<soc>/` 的产物生成 TF 卡镜像 |
+| [buidl_tools.sh](buidl_tools.sh) | 旧的 shell 编译入口，仍然保留。按参数编译 H3 或 H5，复制产物到 `build/<soc>/`，不打包 |
+| [make-img.sh](make-img.sh) | 旧的 shell 镜像脚本（需 sudo；优先使用 `build/<soc>/` 下的 Image/dtb） |
 | [clean.sh](clean.sh) | 对 u-boot、ATF、crust、linux 执行清理，并删除仓库根目录 `build/` |
 
 ## 运行环境
 
 - **必须在 Linux（或 WSL 等等价环境）下执行**编译与镜像步骤。
+- `buidl_tools.py` 与 `makeimg.py` 只用 Python 3 标准库，不需要 `pip` 安装第三方包。
 - 编译：需要 `bash`、`make`、`tar`（含 xz 支持 `tar -xJf`）、主机 `gcc`/`bison`/`flex`（缺失时仅警告）。
 - 镜像：需要 `sudo`，以及 `dd`、`parted`、`losetup`、`mkfs.vfat`、`mkfs.ext4`（通常来自 `dosfstools`、`e2fsprogs`、`util-linux`）。
 - 可选：若使用环境变量 **`BOOT_CMD`** 从 `boot.cmd` 自动生成 `boot.scr`，需要 **`mkimage`**（u-boot 自带的 `tools/mkimage` 或发行版包 `u-boot-tools`）。
@@ -30,6 +33,84 @@
 | Crust（OpenRISC / or1k） | `tools/or1k-linux-musl-7.2.0-20180317.tar.gz` | `tools/or1k-linux-musl-7.2.0`（若顶层目录不一致会尝试查找 `or1k-linux-musl-gcc`） |
 
 **`clean.sh` 不会删除**上述已解压目录。
+
+## 使用 `buidl_tools.py`
+
+在 Linux 上执行。脚本按自己的路径找仓库根，不需要 `source`。交叉编译器路径只在这次 Python 进程和它拉起的 `make` 里生效，退出后当前终端的 `PATH` 不变。
+
+不带任何参数，或者带 `--help`、`-h`，只打印命令清单，退出码 0，不开始编译。清单里 **H5 和 H3 都会输出**，下面每条都可以直接复制。
+
+```bash
+python3 build-scripts/buidl_tools.py
+python3 build-scripts/buidl_tools.py --help
+```
+
+H5 只编译：
+
+```bash
+python3 build-scripts/buidl_tools.py h5
+python3 build-scripts/buidl_tools.py h5 debug
+```
+
+H5 编译成功后立刻打包：
+
+```bash
+python3 build-scripts/buidl_tools.py h5 img
+python3 build-scripts/buidl_tools.py h5 debug img
+```
+
+H3 只编译：
+
+```bash
+python3 build-scripts/buidl_tools.py h3
+python3 build-scripts/buidl_tools.py h3 debug
+```
+
+H3 编译成功后立刻打包：
+
+```bash
+python3 build-scripts/buidl_tools.py h3 img
+python3 build-scripts/buidl_tools.py h3 debug img
+```
+
+单独打包，不重新编译：
+
+```bash
+python3 build-scripts/makeimg.py h5
+python3 build-scripts/makeimg.py h3
+```
+
+`debug` 与 `img` 都可以不写。两个都写时顺序不限，例如 `h3 img debug`。不能重复，也不能再写 `--rootfs`、`--size` 这类参数。
+
+`debug` 只给正式编译的 `make` 增加 `V=1`。它不会把 ATF 编成 debug 版，`bl31.bin` 仍在 `arm-trusted-firmware/build/sun50i_a64/release/`。
+
+不带 `img` 时只编译，不生成 sdcard 镜像。编译成功后脚本会再打印一段提示，说明本次没有打包，并再次给出 H5、H3 的编译并打包命令，以及单独执行 `makeimg.py` 的命令。对应代码在 `buidl_tools.py` 的 `print_pack_hint`：
+
+```python
+def print_pack_hint(soc: str) -> None:
+    log("======== 本次没有打包 ========")
+    log(f"芯片 {soc} 已经编译完成，没有生成 SD 卡镜像。")
+    log("如果需要编译并打包，执行:")
+    log("  python3 build-scripts/buidl_tools.py h5 img")
+    log("  python3 build-scripts/buidl_tools.py h5 debug img")
+    log("  python3 build-scripts/buidl_tools.py h3 img")
+    log("  python3 build-scripts/buidl_tools.py h3 debug img")
+    log("单独打包，不重新编译，执行:")
+    log("  python3 build-scripts/makeimg.py h5")
+    log("  python3 build-scripts/makeimg.py h3")
+```
+
+带 `img` 时，打包逻辑在 `buidl_tools.py` 内部执行，进程参数里不会再出现 `makeimg.py`。rootfs 和镜像大小使用 `makeimg.py` 的默认规则：按芯片在 `tools/` 里找 rootfs，镜像至少 2048MiB，rootfs 更大时自动加大。镜像写到：
+
+- `build/h5/quark-n-h5-sdcard.img`
+- `build/h3/quark-n-h3-sdcard.img`
+
+H5 编译顺序：AArch64 与 or1k 工具链、ATF、Crust、U-Boot、内核 `Image dtbs modules`。  
+H3 编译顺序：ARM32 工具链、U-Boot、内核 `Image zImage dtbs modules`。H3 不编译 ATF / Crust。U-Boot 用 `bootz` 启动 `zImage`。
+
+并行数用环境变量 `JOBS`。未设置时用 CPU 核数，取不到则用 4。`LOIS_SKIP_GIT_LFS`、`CRUST_DEFCONFIG` 与 shell 入口含义相同。
+
+完整实现和与 `buidl_tools.sh` 的逐项对照见 [buidl_tools.py迁移方案.md](buidl_tools.py迁移方案.md)。
 
 ## 使用 `buidl_tools.sh`
 
@@ -99,9 +180,9 @@ bash build-scripts/buidl_tools.sh h5
     - `Image`、`sun50i-h5-quark-luoorshi.dtb`
     - 可选：`System.map`、`kernel.config`
     - 日志：`u-boot-build.log`、`kernel-build.log`
-- 镜像文件（由 **`make-img.sh`** 生成，**不**由 `buidl_tools.sh` 自动生成）：
-  - **`build/quark-n-h3-sdcard.img`**
-  - **`build/quark-n-h5-sdcard.img`**
+- 镜像文件：
+  - **`buidl_tools.py <h3|h5> img`** 或 **`makeimg.py <h3|h5>`** 生成 `build/<soc>/quark-n-<soc>-sdcard.img`，例如 `build/h5/quark-n-h5-sdcard.img`、`build/h3/quark-n-h3-sdcard.img`。不带 `img` 的编译不会生成这两个文件。
+  - 旧的 **`make-img.sh`** 仍生成 `build/quark-n-h3-sdcard.img`、`build/quark-n-h5-sdcard.img`。`buidl_tools.sh` 不会自动打包。
 
 镜像流程：`dd` 创建约 2048MiB 空文件 → `parted` MBR → 分区 1：FAT32（1MiB–256MiB）→ 分区 2：ext4（剩余）→ `losetup --find --show --partscan` → 格式化 →（可选）复制启动文件 → 卸载 → **`dd` 烧录 u-boot** 到 loop 设备 **`bs=1k seek=8 conv=notrunc`**（与指南一致）。
 

@@ -391,6 +391,24 @@ build_kernel_h3() {
 	[[ -f "$dtb" ]] || { die "未生成 DTB: $dtb"; return 1; }
 }
 
+# 本次编译生成了 8723b.o 时，把 rtl8xxxu/firmware 里的固件拷到 build/<soc>。
+# makeimg.py 再把 build/<soc>/lib/firmware 放进镜像根分区。
+copy_rtl8723bu_firmware() {
+	local soc="$1"
+	local obj="$REPO_ROOT/linux/drivers/net/wireless/realtek/rtl8xxxu/8723b.o"
+	local src="$REPO_ROOT/linux/drivers/net/wireless/realtek/rtl8xxxu/firmware/rtl8723bu_nic.bin"
+	local dest="$BUILD_ROOT/$soc/lib/firmware/rtlwifi/rtl8723bu_nic.bin"
+
+	if [[ ! -f "$obj" ]]; then
+		echo "未编译 8723b.c（没有 $obj），跳过 RTL8723BU 固件"
+		return 0
+	fi
+	[[ -f "$src" ]] || { die "已编译 8723b.c，但缺少固件: $src"; return 1; }
+	mkdir -p "$(dirname "$dest")" || { die "无法创建固件目录: $(dirname "$dest")"; return 1; }
+	cp -f "$src" "$dest" || { die "复制 RTL8723BU 固件失败: $dest"; return 1; }
+	echo "RTL8723BU 固件已复制到 $dest"
+}
+
 copy_artifacts_h5() {
 	local img dtb bl31 scp
 	img="$REPO_ROOT/linux/arch/arm64/boot/Image"
@@ -409,6 +427,7 @@ copy_artifacts_h5() {
 	cp -f "$dtb" "$BUILD_ROOT/h5/sun50i-h5-quark-luoorshi.dtb" || { die "复制 dtb 失败"; return 1; }
 	cp -f "$REPO_ROOT/linux/System.map" "$BUILD_ROOT/h5/System.map" 2>/dev/null || true
 	cp -f "$REPO_ROOT/linux/.config" "$BUILD_ROOT/h5/kernel.config" 2>/dev/null || true
+	copy_rtl8723bu_firmware h5 || return 1
 	echo "产物已复制到 $BUILD_ROOT/h5/ （含 u-boot、bl31、scp、Image、dtb）"
 }
 
@@ -427,6 +446,7 @@ copy_artifacts_h3() {
 	cp -f "$dtb" "$BUILD_ROOT/h3/sun8i-h3-quark-luoorshi.dtb" || { die "复制 dtb 失败"; return 1; }
 	cp -f "$REPO_ROOT/linux/System.map" "$BUILD_ROOT/h3/System.map" 2>/dev/null || true
 	cp -f "$REPO_ROOT/linux/.config" "$BUILD_ROOT/h3/kernel.config" 2>/dev/null || true
+	copy_rtl8723bu_firmware h3 || return 1
 	echo "产物已复制到 $BUILD_ROOT/h3/ （含 u-boot、Image、zImage、dtb）"
 }
 
