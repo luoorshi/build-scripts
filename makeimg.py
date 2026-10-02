@@ -439,26 +439,35 @@ def find_mkimage() -> str:
     die("未找到 mkimage。请先编译 U-Boot（生成 u-boot/tools/mkimage），或安装 u-boot-tools。")
 
 
-def write_boot_script(soc: str) -> Path:
-    """生成 boot.cmd / boot.scr。
+def boot_script_text(soc: str) -> str:
+    """生成 boot.cmd 正文。
 
-    在指南原命令前写明 mmc 0 的分区变量。否则只有 distro boot 预先设置过
-    devtype/devnum/distro_bootpart 时，load 才能找到 Image 和 dtb。
+    distro boot 找到这份脚本时，已经把 devtype/devnum/distro_bootpart
+    设成脚本所在的卡。TF 是 U-Boot mmc 0，对应 Linux /dev/mmcblk0p2。
+    eMMC 在 sunxi-u-boot.dtsi 里被别名成 U-Boot mmc 1，对应 Linux
+    /dev/mmcblk2p2（硬件 MMC2）。不能再把设备写死成 mmc 0。
     """
     info = SOC_INFO[soc]
-    dtb_name = info["dtb_name"]
-    kernel_file = info["kernel_file"]
-    boot_cmd = info["boot_cmd"]
-    content = (
-        'setenv bootargs "console=ttyS0,115200 root=/dev/mmcblk0p2 rootwait rw panic=10"\n'
-        "setenv devtype mmc\n"
-        "setenv devnum 0\n"
-        "setenv distro_bootpart 1\n"
-        "mmc dev 0\n"
-        "load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} " + kernel_file + "\n"
-        "load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} " + dtb_name + "\n"
-        + boot_cmd + " ${kernel_addr_r} - ${fdt_addr_r}\n"
+    return (
+        'if test -z "${devtype}"; then setenv devtype mmc; fi\n'
+        'if test -z "${devnum}"; then setenv devnum 0; fi\n'
+        'if test -z "${distro_bootpart}"; then setenv distro_bootpart 1; fi\n'
+        'if test "${devnum}" = "1"; then setenv rootdev /dev/mmcblk2p2; '
+        'else setenv rootdev /dev/mmcblk0p2; fi\n'
+        'setenv bootargs "console=ttyS0,115200 root=${rootdev} rootwait rw panic=10 '
+        'fbcon=logo-count:1,logo-pos:center"\n'
+        'echo "Boot ${devtype} ${devnum}:${distro_bootpart} root=${rootdev}"\n'
+        "mmc dev ${devnum}\n"
+        "load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} " + info["kernel_file"] + " && "
+        "load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} " + info["dtb_name"] + " && "
+        + info["boot_cmd"] + " ${kernel_addr_r} - ${fdt_addr_r}\n"
     )
+
+
+def write_boot_script(soc: str) -> Path:
+    """生成 boot.cmd / boot.scr。"""
+    info = SOC_INFO[soc]
+    content = boot_script_text(soc)
     cmd_path = soc_dir(soc) / "boot.cmd"
     scr_path = soc_dir(soc) / "boot.scr"
     with cmd_path.open("w", encoding="utf-8", newline="\n") as handle:
@@ -769,7 +778,7 @@ def write_manifest(soc: str, artifacts: dict[str, Path], rootfs: Path, rootfs_or
         f"rootfs_origin={rootfs_origin}",
         f"modules={module_action}",
         f"rtl8723bu_firmware={soc_dir(soc) / STAGED_FW_REL}",
-        'bootargs=console=ttyS0,115200 root=/dev/mmcblk0p2 rootwait panic=10',
+        "bootargs=TF:root=/dev/mmcblk0p2 eMMC:root=/dev/mmcblk2p2",
         "",
     ]
     path = soc_dir(soc) / "makeimg-manifest.txt"
